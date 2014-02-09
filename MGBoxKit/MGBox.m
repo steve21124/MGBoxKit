@@ -508,7 +508,7 @@
             NSLog(@"pan state began");
             self.panning = YES;
         }
-        else if(recognizer.state == UIGestureRecognizerStateEnded){
+        else if(recognizer.state == UIGestureRecognizerStateEnded || recognizer.state == UIGestureRecognizerStateFailed || recognizer.state == UIGestureRecognizerStateCancelled) {
             NSLog(@"pan state ended");
             self.panning = NO;
             self.allowPanning = NO;
