@@ -3,7 +3,6 @@
 //
 
 #import "MGMushParser.h"
-#import "UIColor+MGExpanded.h"
 
 @implementation MGMushParser {
   NSMutableAttributedString *working;
@@ -36,8 +35,7 @@
   // apply base colour and font
   id base = @{
     NSForegroundColorAttributeName:self.baseColor,
-    NSFontAttributeName:self.baseFont,
-    NSParagraphStyleAttributeName:NSParagraphStyle.defaultParagraphStyle
+    NSFontAttributeName:self.baseFont
   };
   [working addAttributes:base range:(NSRange){0, working.length}];
 
@@ -66,17 +64,10 @@
     @"attributes":@[@{ }, @{ NSFontAttributeName:monospace }, @{ }]
   };
 
-  id colourParser = @{
-      @"regex":@"(\\{)(.+?)(\\|)(.+?)(\\})",
-      @"replace":@[@"", @"", @"", @3, @""],
-      @"attributes":@[@{ }, @{ }, @{ }, @[@"colour", @1], @{ }]
-  };
-
   [self applyParser:boldParser];
   [self applyParser:italicParser];
   [self applyParser:underlineParser];
   [self applyParser:monospaceParser];
-  [self applyParser:colourParser];
 }
 
 - (void)strip {
@@ -102,16 +93,10 @@
     @"replace":@[@"", @1, @""]
   };
 
-  id colourParser = @{
-      @"regex":@"(\\{)(.+?)(\\|)(.+?)(\\})",
-      @"replace":@[@"", @"", @"", @3, @""]
-  };
-
   [self applyParser:boldParser];
   [self applyParser:italicParser];
   [self applyParser:underlineParser];
   [self applyParser:monospaceParser];
-  [self applyParser:colourParser];
 }
 
 - (void)applyParser:(NSDictionary *)parser {
@@ -146,17 +131,7 @@
         // apply attributes
         for (int i = 0; i < match.numberOfRanges - 1; i++) {
           id attributes = parser[@"attributes"][i];
-
-          // hard coded colour parser
-          if ([attributes isKindOfClass:NSArray.class]) {
-            NSMutableAttributedString *repl = replacements[i];
-            id hex = [substrs[[attributes[1] intValue]] string];
-            attributes = @{
-                NSForegroundColorAttributeName:[UIColor colorWithHexString:hex]
-            };
-            [repl addAttributes:attributes range:(NSRange){0, repl.length}];
-
-          } else if (attributes) {
+          if (attributes) {
             NSMutableAttributedString *repl = replacements[i];
             [repl addAttributes:attributes range:(NSRange){0, repl.length}];
           }
@@ -196,31 +171,15 @@
   CTFontRef ctBold = CTFontCreateCopyWithSymbolicTraits(ctBase, 0, NULL,
       kCTFontBoldTrait, kCTFontBoldTrait);
   CFStringRef boldName = CTFontCopyName(ctBold, kCTFontPostScriptNameKey);
-  bold = [UIFont fontWithName:(__bridge NSString *)boldName size:size] ?: font;
+  bold = [UIFont fontWithName:(__bridge NSString *)boldName size:size];
 
   // italic font
   CTFontRef ctItalic = CTFontCreateCopyWithSymbolicTraits(ctBase, 0, NULL,
       kCTFontItalicTrait, kCTFontItalicTrait);
   CFStringRef italicName = CTFontCopyName(ctItalic, kCTFontPostScriptNameKey);
-  italic = [UIFont fontWithName:(__bridge NSString *)italicName size:size] ?: font;
+  italic = [UIFont fontWithName:(__bridge NSString *)italicName size:size];
 
   monospace = [UIFont fontWithName:@"CourierNewPSMT" size:size];
-
-  if (ctBase) {
-    CFRelease(ctBase);
-  }
-  if (ctBold) {
-    CFRelease(ctBold);
-  }
-  if (ctItalic) {
-    CFRelease(ctItalic);
-  }
-  if (boldName) {
-    CFRelease(boldName);
-  }
-  if (italicName) {
-    CFRelease(italicName);
-  }
 }
 
 #pragma mark - Getters

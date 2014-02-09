@@ -6,7 +6,6 @@
 
 #import "MGScrollView.h"
 #import "MGLayoutManager.h"
-#import "MGBoxProvider.h"
 
 // default keyboardMargin
 #define KEYBOARD_MARGIN 8
@@ -15,18 +14,15 @@
   CGFloat keyboardNudge;
   BOOL fixedPositionEstablished;
   BOOL asyncDrawing, asyncDrawOnceing;
-  CGRect keyboardFrame;
 }
 
 // MGLayoutBox protocol
-@synthesize boxes, boxProvider, boxPositions, parentBox;
-@synthesize boxLayoutMode, contentLayoutMode;
+@synthesize boxes, parentBox, boxLayoutMode, contentLayoutMode;
 @synthesize asyncLayout, asyncLayoutOnce, asyncQueue;
 @synthesize margin, topMargin, bottomMargin, leftMargin, rightMargin;
 @synthesize padding, topPadding, rightPadding, bottomPadding, leftPadding;
-@synthesize attachedTo, replacementFor, sizingMode, minWidth;
+@synthesize attachedTo, replacementFor, sizingMode;
 @synthesize fixedPosition, zIndex, layingOut, slideBoxesInFromEmpty;
-@synthesize dontLayoutChildren;
 
 // MGLayoutBox protocol optionals
 @synthesize tapper, tappable, onTap;
@@ -63,10 +59,6 @@
   // defaults
   self.keyboardMargin = KEYBOARD_MARGIN;
   self.keepFirstResponderAboveKeyboard = YES;
-  self.viewportMargin = UIScreen.mainScreen.bounds.size;
-  self.boxPositions = @[].mutableCopy;
-
-  self.delegate = self;
 
   // watch for the keyboard
   [NSNotificationCenter.defaultCenter addObserver:self
@@ -80,16 +72,6 @@
 #pragma mark - Layout
 
 - (void)layout {
-
-  // box provider style layout
-  if (self.boxProvider) {
-    [self updateContentSize];
-    [self.boxProvider updateVisibleIndexes];
-    [MGLayoutManager layoutBoxesIn:self
-        atIndexes:self.boxProvider.visibleIndexes];
-    return;
-  }
-
   [MGLayoutManager layoutBoxesIn:self];
 
   // async draws
@@ -110,7 +92,8 @@
   }
 }
 
-- (void)layoutWithSpeed:(NSTimeInterval)speed completion:(Block)completion {
+- (void)layoutWithSpeed:(NSTimeInterval)speed
+             completion:(Block)completion {
   [MGLayoutManager layoutBoxesIn:self withSpeed:speed completion:completion];
 }
 
@@ -123,15 +106,6 @@
       box.y = box.fixedPosition.y + self.contentOffset.y;
     }
   }
-}
-
-- (void)updateContentSize {
-  CGSize size = (CGSize){self.width, self.topPadding + self.bottomPadding};
-  for (int i = 0; i < self.boxProvider.count; i++) {
-    CGSize boxSize = [self.boxProvider sizeForBoxAtIndex:i];
-    size.height += boxSize.height;
-  }
-  self.contentSize = size;
 }
 
 #pragma mark - Interaction
@@ -162,32 +136,7 @@
   [self scrollRectToVisible:CGRectInset(frame, -_margin, -_margin) animated:YES];
 }
 
-- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
-  if (self.boxProvider) {
-    [self.boxProvider updateVisibleIndexes];
-    [MGLayoutManager layoutBoxesIn:self
-        atIndexes:self.boxProvider.visibleIndexes];
-
-    // Apple bug workaround
-    self.showsVerticalScrollIndicator = NO;
-    self.showsVerticalScrollIndicator = YES;
-  }
-}
-
 #pragma mark - Edge snapping
-
-- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
-  if (self.snapToBoxEdges) {
-    [self snapToNearestBox];
-  }
-}
-
-- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView
-                  willDecelerate:(BOOL)decelerate {
-  if (self.snapToBoxEdges && !decelerate) {
-    [self snapToNearestBox];
-  }
-}
 
 - (void)snapToNearestBox {
   if (self.contentSize.height <= self.frame.size.height) {
@@ -225,8 +174,6 @@
 
 #pragma mark - Dealing with the keyboard
 
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-
 - (void)keyboardWillAppear:(NSNotification *)note {
 
   // haven't been asked to deal with keyboard scrolling?
@@ -239,7 +186,7 @@
 
   // target by finding a descendant that's first respondent
   if (!view && self.keepFirstResponderAboveKeyboard) {
-    UIResponder *first = self.currentFirstResponder;
+    UIResponder *first = UIApplication.sharedApplication.currentFirstResponder;
     if ([first isKindOfClass:UIView.class]
         && [(id)first isDescendantOfView:self]) {
       view = (id)first;
@@ -249,16 +196,15 @@
   }
 
   // target rect in local space
-  CGRect target = [view.superview convertRect:view.frame toView:nil];
+  CGRect target = [view.superview convertRect:view.frame toView:self];
 
   // keyboard's frame
-  if (note) {
-    keyboardFrame = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-  }
+  CGRect keyboard = [note.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+  keyboard = [self convertRect:keyboard fromView:nil];
 
   // determine overage
   CGFloat targetBottom = target.origin.y + target.size.height;
-  CGFloat over = targetBottom + self.keyboardMargin - keyboardFrame.origin.y;
+  CGFloat over = targetBottom + self.keyboardMargin - keyboard.origin.y;
 
   // need to nudge?
   keyboardNudge = over > 0 ? over : 0;
@@ -267,20 +213,14 @@
   }
 
   // animate the scroll
-  double d = note
-      ? [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue]
-      : 0.1;
-  int curve = note
-      ? [note.userInfo[UIKeyboardAnimationCurveUserInfoKey] intValue]
-      : UIViewAnimationCurveEaseInOut;
+  double d = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
+  int curve = [note.userInfo[UIKeyboardAnimationCurveUserInfoKey] intValue];
   [UIView animateWithDuration:d delay:0 options:curve animations:^{
     CGPoint offset = self.contentOffset;
     offset.y += over;
     self.contentOffset = offset;
   } completion:nil];
 }
-
-#pragma clang diagnostic warning "-Wdeprecated-declarations"
 
 - (void)keyboardWillDisappear:(NSNotification *)note {
   double d = [note.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
@@ -300,7 +240,6 @@
     }
     return;
   }
-
   [UIView animateWithDuration:0.3 animations:^{
     CGPoint offset = self.contentOffset;
     offset.y -= keyboardNudge;
@@ -353,26 +292,13 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
   }
 }
 
-- (void)setBoxProvider:(MGBoxProvider *)provider {
-  boxProvider = provider;
-  provider.container = self;
-}
-
 #pragma mark - Getters
 
-- (NSMutableArray *)boxes {
+- (NSMutableOrderedSet *)boxes {
   if (!boxes) {
-    boxes = @[].mutableCopy;
+    boxes = NSMutableOrderedSet.orderedSet;
   }
   return boxes;
-}
-
-- (CGRect)bufferedViewport {
-  UIEdgeInsets buffer = UIEdgeInsetsMake(-self.viewportMargin.height,
-      -self.viewportMargin.width, -self.viewportMargin.height,
-      -self.viewportMargin.width);
-  return CGRectOffset(UIEdgeInsetsInsetRect(self.frame, buffer),
-      self.contentOffset.x, self.contentOffset.y);
 }
 
 - (UIEdgeInsets)margin {

@@ -31,6 +31,7 @@
 #pragma mark - Box visibility
 
 - (void)updateVisibleIndexes {
+    /*
   CGRect viewport = self.container.bufferedViewport;
 
   // remove any indexes that are no longer visible
@@ -87,6 +88,7 @@
 
     index++;
   }
+     */
 }
 
 #pragma mark - Box detail factories

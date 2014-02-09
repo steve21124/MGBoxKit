@@ -13,14 +13,12 @@
 }
 
 // MGLayoutBox protocol
-@synthesize boxes, boxProvider, boxPositions, parentBox;
-@synthesize boxLayoutMode, contentLayoutMode;
+@synthesize boxes, parentBox, boxLayoutMode, contentLayoutMode;
 @synthesize asyncLayout, asyncLayoutOnce, asyncQueue;
 @synthesize margin, topMargin, bottomMargin, leftMargin, rightMargin;
 @synthesize padding, topPadding, rightPadding, bottomPadding, leftPadding;
-@synthesize attachedTo, replacementFor, sizingMode, minWidth;
+@synthesize attachedTo, replacementFor, sizingMode;
 @synthesize fixedPosition, zIndex, layingOut, slideBoxesInFromEmpty;
-@synthesize dontLayoutChildren;
 
 - (id)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
@@ -59,9 +57,9 @@
 
 #pragma mark - Getters
 
-- (NSMutableArray *)boxes {
+- (NSMutableOrderedSet *)boxes {
   if (!boxes) {
-    boxes = @[].mutableCopy;
+    boxes = NSMutableOrderedSet.orderedSet;
   }
   return boxes;
 }

@@ -8,7 +8,7 @@
 #import "MGMushParser.h"
 #import "NSAttributedString+MGTrim.h"
 
-// extra width allowance due to 'boundingRectWithSize' inaccuracy
+#define FALLBACK(potential, fallback) (potential ? potential : fallback)
 
 @interface MGLine ()
 
@@ -34,21 +34,11 @@
   self.leftTextShadowOffset = (CGSize){0, 1};
   self.middleTextShadowOffset = (CGSize){0, 1};
   self.rightTextShadowOffset = (CGSize){0, 1};
-  self.opaqueLabels = NO;
 
-  // default horizontal and vertical alignments
-  self.leftItemsAlignment = NSTextAlignmentLeft;
-  self.middleItemsAlignment = NSTextAlignmentCenter;
-  self.rightItemsAlignment = NSTextAlignmentRight;
-  self.verticalAlignment = MGVerticalAlignmentCenter;
-
-  // default item layout precedence
-  self.sidePrecedence = MGSidePrecedenceLeft;
-
-  // default column widths (0 = flexible)
-  self.leftWidth = 0;
-  self.middleWidth = 0;
-  self.rightWidth = 0;
+  // default text alignments
+  self.leftItemsTextAlignment = NSTextAlignmentLeft;
+  self.middleItemsTextAlignment = NSTextAlignmentCenter;
+  self.rightItemsTextAlignment = NSTextAlignmentRight;
 
   // may be deprecated in future. use MGBox borders instead
   self.underlineType = MGUnderlineNone;
@@ -133,109 +123,25 @@
 
   [self removeOldContents];
 
-  // apply line spacing
-  if ([UILabel instancesRespondToSelector:@selector(attributedText)]) {
-    for (UILabel *label in self.leftItems) {
-      if ([label isKindOfClass:UILabel.class]) {
-        label.attributedText =
-            [self applyLineSpacing:self.leftLineSpacing to:label.attributedText];
-      }
-    }
-    for (UILabel *label in self.middleItems) {
-      if ([label isKindOfClass:UILabel.class]) {
-        label.attributedText =
-            [self applyLineSpacing:self.middleLineSpacing to:label.attributedText];
-      }
-    }
-    for (UILabel *label in self.rightItems) {
-      if ([label isKindOfClass:UILabel.class]) {
-        label.attributedText =
-            [self applyLineSpacing:self.rightLineSpacing to:label.attributedText];
-      }
-    }
-  }
-
   // max usable space
-  CGFloat maxWidth = self.widenAsNeeded
-          ? FLT_MAX
-          :  self.width - self.leftPadding - self.rightPadding;
-
-  // assign space for fixed width columns
-  leftUsed = self.leftWidth ? self.leftWidth : 0;
-  middleUsed = self.middleWidth ? self.middleWidth : 0;
-  rightUsed = self.rightWidth ? self.rightWidth : 0;
+  CGFloat maxWidth = self.width - self.leftPadding - self.rightPadding;
 
   // lay things out
-  CGFloat from, limit, used;
   switch (self.sidePrecedence) {
     case MGSidePrecedenceLeft:
-
-      // left first
-      limit = self.leftWidth ? self.leftWidth : maxWidth;
-      used = [self layoutItems:self.leftItems from:self.leftPadding within:limit
-          align:self.leftItemsAlignment];
-      leftUsed = self.leftWidth ? self.leftWidth : used;
-
-      // right second
-      from = self.leftPadding + leftUsed + middleUsed;
-      limit = self.rightWidth ? self.rightWidth : maxWidth - leftUsed;
-      used = [self layoutItems:self.rightItems from:from within:limit
-          align:self.rightItemsAlignment];
-      rightUsed = self.rightWidth ? self.rightWidth : used;
-
-      // middle last
-      from = self.leftPadding + leftUsed;
-      limit = self.middleWidth ? self.middleWidth : maxWidth - leftUsed
-          - rightUsed;
-      used = [self layoutItems:self.middleItems from:from within:limit
-          align:self.middleItemsAlignment];
-      middleUsed = self.middleWidth ? self.middleWidth : used;
+      [self layoutLeftWithin:maxWidth];
+      [self layoutRightWithin:maxWidth - leftUsed];
+      [self layoutMiddleWithin:maxWidth - leftUsed - rightUsed];
       break;
-
     case MGSidePrecedenceRight:
-
-      // right first
-      limit = self.rightWidth ? self.rightWidth : maxWidth;
-      used = [self layoutItems:self.rightItems from:self.leftPadding within:limit
-          align:self.rightItemsAlignment];
-      rightUsed = self.rightWidth ? self.rightWidth : used;
-
-      // left second
-      limit = self.leftWidth ? self.leftWidth : maxWidth - rightUsed;
-      used = [self layoutItems:self.leftItems from:self.leftPadding within:limit
-          align:self.leftItemsAlignment];
-      leftUsed = self.leftWidth ? self.leftWidth : used;
-
-      // middle last
-      from = self.leftPadding + leftUsed;
-      limit = self.middleWidth ? self.middleWidth : maxWidth - leftUsed
-          - rightUsed;
-      used = [self layoutItems:self.middleItems from:from within:limit
-          align:self.middleItemsAlignment];
-      middleUsed = self.middleWidth ? self.middleWidth : used;
+      [self layoutRightWithin:maxWidth];
+      [self layoutLeftWithin:maxWidth - rightUsed];
+      [self layoutMiddleWithin:maxWidth - leftUsed - rightUsed];
       break;
-
     case MGSidePrecedenceMiddle:
-
-      // middle first
-      limit = self.middleWidth ? self.middleWidth : maxWidth;
-      used = [self layoutItems:self.middleItems from:self.leftPadding within:limit
-          align:self.middleItemsAlignment];
-      middleUsed = self.middleWidth ? self.middleWidth : used;
-
-      // left second
-      limit = self.leftWidth ? self.leftWidth : maxWidth - middleUsed;
-      used = [self layoutItems:self.leftItems from:self.leftPadding within:limit
-          align:self.leftItemsAlignment];
-      leftUsed = self.leftWidth ? self.leftWidth : used;
-
-      // right last
-      from = self.leftPadding + leftUsed + middleUsed;
-      limit = self.rightWidth ? self.rightWidth : maxWidth - leftUsed
-          - middleUsed;
-      used = [self layoutItems:self.rightItems from:from within:limit
-          align:self.rightItemsAlignment];
-      rightUsed = self.rightWidth ? self.rightWidth : used;
+      [self layoutMiddleWithin:maxWidth];
+      [self layoutLeftWithin:(maxWidth - middleUsed) / 2];
+      [self layoutRightWithin:(maxWidth - middleUsed) / 2];
       break;
   }
 
@@ -303,43 +209,10 @@
   [gone makeObjectsPerformSelector:@selector(removeFromSuperview)];
 }
 
-- (NSAttributedString *)applyLineSpacing:(CGFloat)spacing
-    to:(NSAttributedString *)string {
-  if (!string.length) {
-    return string;
-  }
-  NSMutableAttributedString *result = string.mutableCopy;
-  NSMutableParagraphStyle *parastyle =
-      [[string attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:NULL]
-          mutableCopy];
-  if (!parastyle) {
-    parastyle = NSParagraphStyle.defaultParagraphStyle.mutableCopy;
-  }
-  parastyle.lineSpacing = spacing;
-  [result addAttribute:NSParagraphStyleAttributeName value:parastyle
-      range:NSMakeRange(0, string.length)];
-  return result;
-}
-
-- (CGFloat)layoutItems:(NSArray *)items from:(CGFloat)x within:(CGFloat)limit
-                 align:(NSTextAlignment)alignment {
+- (void)layoutLeftWithin:(CGFloat)limit {
 
   // size and discard
-  CGFloat used = [self size:items within:limit];
-
-  // deal with item alignment
-  CGFloat nudge = 0;
-  switch (alignment) {
-    case NSTextAlignmentCenter:
-      nudge = (limit - used) / 2;
-      break;
-    case NSTextAlignmentRight:
-      nudge = limit - used;
-      break;
-    case NSTextAlignmentLeft:
-    default:
-      break;
-  }
+  leftUsed = [self size:self.leftItems within:limit];
 
   // widen as needed
   if (self.widenAsNeeded) {
@@ -349,8 +222,9 @@
   }
 
   // lay out
-  for (int i = 0; i < items.count; i++) {
-    UIView *view = items[i];
+  CGFloat x = self.leftPadding;
+  for (int i = 0; i < self.leftItems.count; i++) {
+    UIView *view = self.leftItems[i];
 
     if ([self.dontFit containsObject:view]) {
       continue;
@@ -362,23 +236,7 @@
     }
 
     x += self.itemPadding;
-
-    CGFloat y = 0;
-    switch (self.verticalAlignment) {
-      case MGVerticalAlignmentTop:
-        y = self.topPadding;
-        view.autoresizingMask = UIViewAutoresizingFlexibleBottomMargin;
-        break;
-      case MGVerticalAlignmentCenter:
-        y = self.paddedVerticalCenter - view.height / 2;
-        view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin
-            | UIViewAutoresizingFlexibleBottomMargin;
-        break;
-      case MGVerticalAlignmentBottom:
-        y = self.height - self.bottomPadding - view.height;
-        view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin;
-        break;
-    }
+    CGFloat y = (self.height - view.height) / 2;
 
     // MGLayoutBoxes have margins to deal with
     if ([view conformsToProtocol:@protocol(MGLayoutBox)]) {
@@ -386,17 +244,127 @@
 
       y += box.topMargin;
       x += box.leftMargin;
-      box.origin = (CGPoint){roundf(x + nudge), roundf(y)};
+      box.frame = CGRectMake(x, roundf(y), box.width, box.height);
       x += box.rightMargin;
 
       // better be a UIView then
     } else {
-      view.origin = (CGPoint){roundf(x + nudge), roundf(y)};
+      view.frame = CGRectMake(x, roundf(y), view.width, view.height);
     }
     x += view.width + self.itemPadding;
+
+    view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin
+        | UIViewAutoresizingFlexibleBottomMargin
+        | UIViewAutoresizingFlexibleRightMargin;
+  }
+}
+
+- (void)layoutRightWithin:(CGFloat)limit {
+
+  // size and discard
+  rightUsed = [self size:self.rightItems within:limit];
+
+  // widen as needed
+  if (self.widenAsNeeded) {
+    CGFloat needed = self.leftPadding + leftUsed + middleUsed + rightUsed
+        + self.rightPadding;
+    self.width = needed > self.width ? needed : self.width;
   }
 
-  return used;
+  // lay out
+  CGFloat x = self.width - self.rightPadding;
+  for (int i = 0; i < self.rightItems.count; i++) {
+    UIView *view = self.rightItems[i];
+
+    if ([self.dontFit containsObject:view]) {
+      continue;
+    }
+
+    if ([view conformsToProtocol:@protocol(MGLayoutBox)]
+        && [(id <MGLayoutBox>)view boxLayoutMode] == MGBoxLayoutAttached) {
+      continue;
+    }
+
+    x -= self.itemPadding;
+    CGFloat y = (self.height - view.height) / 2;
+
+    // MGLayoutBoxes have margins to deal with
+    if ([view conformsToProtocol:@protocol(MGLayoutBox)]) {
+      UIView <MGLayoutBox> *box = (id)view;
+
+      y += box.topMargin;
+      x -= box.width + box.rightMargin;
+      box.frame = CGRectMake(x, roundf(y), box.width, box.height);
+      x -= box.leftMargin;
+
+      // hopefully is a UIView then
+    } else {
+      x -= view.width;
+      view.frame = CGRectMake(x, roundf(y), view.width, view.height);
+    }
+
+    x -= self.itemPadding;
+
+    view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin
+        | UIViewAutoresizingFlexibleBottomMargin
+        | UIViewAutoresizingFlexibleLeftMargin;
+  }
+}
+
+- (void)layoutMiddleWithin:(CGFloat)limit {
+
+  // size and discard
+  middleUsed = [self size:self.middleItems within:limit];
+
+  // widen as needed
+  if (self.widenAsNeeded) {
+    CGFloat needed = self.leftPadding + leftUsed + middleUsed + rightUsed
+        + self.rightPadding;
+    self.width = needed > self.width ? needed : self.width;
+  }
+
+  // lay out
+  CGFloat x;
+  if (self.sidePrecedence == MGSidePrecedenceMiddle) {
+    x = roundf((self.width - middleUsed) / 2);
+  } else {
+    x = self.leftPadding + leftUsed + roundf((limit - middleUsed) / 2);
+  }
+
+  for (int i = 0; i < self.middleItems.count; i++) {
+    UIView *view = self.middleItems[i];
+
+    if ([self.dontFit containsObject:view]) {
+      continue;
+    }
+
+    if ([view conformsToProtocol:@protocol(MGLayoutBox)]
+        && [(id <MGLayoutBox>)view boxLayoutMode] == MGBoxLayoutAttached) {
+      continue;
+    }
+
+    x += self.itemPadding;
+    CGFloat y = (self.height - view.height) / 2;
+
+    // MGLayoutBoxes have margins to deal with
+    if ([view conformsToProtocol:@protocol(MGLayoutBox)]) {
+      UIView <MGLayoutBox> *box = (id)view;
+      y += box.topMargin;
+      x += box.leftMargin;
+      box.frame = CGRectMake(x, roundf(y), box.width, box.height);
+      x += box.rightMargin;
+
+      // better be a UIView then
+    } else {
+      view.frame = CGRectMake(x, roundf(y), view.width, view.height);
+    }
+    x += view.width + self.itemPadding;
+
+    view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin
+        | UIViewAutoresizingFlexibleBottomMargin
+        | UIViewAutoresizingFlexibleLeftMargin
+        | UIViewAutoresizingFlexibleRightMargin;
+  }
 }
 
 - (void)adjustHeight {
@@ -481,14 +449,14 @@
       if (!label.numberOfLines) {
         CGFloat maxHeight = self.maxHeight ? self.maxHeight - self.topPadding
             - self.bottomPadding : FLT_MAX;
-          
+
         // attributed string?
         if ([label respondsToSelector:@selector(attributedText)]) {
           CGSize maxSize = (CGSize){limit - used, maxHeight};
           CGSize size = [label.attributedText boundingRectWithSize:maxSize
               options:NSStringDrawingUsesLineFragmentOrigin
                   | NSStringDrawingUsesFontLeading context:nil].size;
-          size.width = ceilf(size.width) < maxSize.width ? ceilf(size.width) : maxSize.width;
+          size.width = ceilf(size.width);
           size.height = ceilf(size.height);
 
           // for auto resizing margin sanity, make height odd/even match with self
@@ -497,13 +465,10 @@
           }
           label.size = size;
 
-          used += (label.width);
-
           // plain old string
         } else {
           label.size = [label.text sizeWithFont:label.font
               constrainedToSize:(CGSize){limit - used, maxHeight}];
-          used += label.width;
         }
 
         // single line
@@ -511,8 +476,9 @@
         if (used + label.width > limit) { // needs slimming
           label.width = limit - used;
         }
-        used += label.width;
       }
+
+      used += label.width;
 
       // MGLayoutBoxes have margins to deal with
     } else if ([item conformsToProtocol:@protocol(MGLayoutBox)]) {
@@ -575,32 +541,32 @@
 
   // base label
   UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
-  label.backgroundColor = self.opaqueLabels
-      ? self.backgroundColor
-      : UIColor.clearColor;
+  label.backgroundColor = UIColor.clearColor;
 
   // styling
   switch (placement) {
     case MGLeft:
       label.font = self.font;
-      label.textAlignment = self.leftItemsAlignment;
+      label.textAlignment = self.leftItemsTextAlignment;
       label.shadowOffset = self.leftTextShadowOffset;
       label.shadowColor = self.textShadowColor;
       label.textColor = self.textColor;
       break;
     case MGMiddle:
-      label.font = self.middleFont ? : self.font;
-      label.textAlignment = self.middleItemsAlignment;
+      label.font = FALLBACK(self.middleFont, self.font);
+      label.textAlignment = self.middleItemsTextAlignment;
       label.shadowOffset = self.middleTextShadowOffset;
-      label.shadowColor = self.middleTextShadowColor ? : self.textShadowColor;
-      label.textColor = self.middleTextColor ? : self.textColor;
+      label.shadowColor
+          = FALLBACK(self.middleTextShadowColor, self.textShadowColor);
+      label.textColor = FALLBACK(self.middleTextColor, self.textColor);
       break;
     case MGRight:
-      label.font = self.rightFont ? : self.font;
-      label.textAlignment = self.rightItemsAlignment;
+      label.font = FALLBACK(self.rightFont, self.font);
+      label.textAlignment = self.rightItemsTextAlignment;
       label.shadowOffset = self.rightTextShadowOffset;
-      label.shadowColor = self.rightTextShadowColor ? : self.textShadowColor;
-      label.textColor = self.rightTextColor ? : self.textColor;
+      label.shadowColor
+          = FALLBACK(self.rightTextShadowColor, self.textShadowColor);
+      label.textColor = FALLBACK(self.rightTextColor, self.textColor);
       break;
   }
 
@@ -643,26 +609,12 @@
     label.text = text;
   }
 
-  // need to reset text alignment due to being overwritten in the attributed string attribs
-  switch (placement) {
-    case MGLeft:
-      label.textAlignment = self.leftItemsAlignment;
-      break;
-    case MGMiddle:
-      label.textAlignment = self.middleItemsAlignment;
-      break;
-    case MGRight:
-      label.textAlignment = self.rightItemsAlignment;
-      break;
-  }
-
   // final resizing will be done at layout time
   if ([label respondsToSelector:@selector(attributedText)]) {
-    CGSize maxSize = (CGSize){FLT_MAX, 0};
+    CGSize maxSize = (CGSize){self.width, 0};
     CGSize size = [label.attributedText boundingRectWithSize:maxSize
-        options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
-        context:nil].size;
-    size.width = ceilf(size.width) < maxSize.width ? ceilf(size.width) : maxSize.width;
+        options:NSStringDrawingUsesLineFragmentOrigin context:nil].size;
+    size.width = ceilf(size.width);
     size.height = ceilf(size.height);
 
     // for auto resizing margin sanity, make height odd/even match with self
@@ -861,20 +813,6 @@
   } else {
     self.rightItems = (id)text;
   }
-}
-
-#pragma mark - Metrics getters
-
-- (CGFloat)leftSpace {
-  return self.innerWidth - middleUsed - rightUsed;
-}
-
-- (CGFloat)middleSpace {
-  return self.innerWidth - leftUsed - rightUsed;
-}
-
-- (CGFloat)rightSpace {
-  return self.innerWidth - leftUsed - middleUsed;
 }
 
 #pragma mark - Getters

@@ -14,20 +14,18 @@
 }
 
 // MGLayoutBox protocol
-@synthesize boxes, boxProvider, boxPositions, parentBox;
-@synthesize boxLayoutMode, contentLayoutMode;
+@synthesize boxes, parentBox, boxLayoutMode, contentLayoutMode;
 @synthesize asyncLayout, asyncLayoutOnce, asyncQueue;
 @synthesize margin, topMargin, bottomMargin, leftMargin, rightMargin;
 @synthesize padding, topPadding, rightPadding, bottomPadding, leftPadding;
-@synthesize attachedTo, replacementFor, sizingMode, minWidth;
+@synthesize attachedTo, replacementFor, sizingMode;
 @synthesize fixedPosition, zIndex, layingOut, slideBoxesInFromEmpty;
-@synthesize dontLayoutChildren;
 
 // MGLayoutBox protocol optionals
 @synthesize tapper, tappable, onTap;
 @synthesize swiper, swipable, onSwipe;
 @synthesize longPresser, longPressable, onLongPress;
-@synthesize onTouchesBegan, onTouchesCancelled, onTouchesEnded;
+@synthesize panner, panning, pannable, onPan, allowPanning;
 
 - (id)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
@@ -104,10 +102,6 @@
   }
 }
 
-- (void)willEnterViewport { }
-
-- (void)didLeaveViewport { }
-
 #pragma mark - Sugar
 
 - (UIImage *)screenshot:(float)scale {
@@ -163,28 +157,8 @@
 - (void)longPressed {
   if (self.onLongPress) {
     self.onLongPress();
+    self.allowPanning = YES;
   }
-}
-
-- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
-    if (self.onTouchesBegan) {
-        self.onTouchesBegan();
-    }
-    [super touchesBegan:touches withEvent:event];
-}
-
-- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
-    if (self.onTouchesCancelled) {
-        self.onTouchesCancelled();
-    }
-    [super touchesCancelled:touches withEvent:event];
-}
-
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
-    if (self.onTouchesEnded) {
-        self.onTouchesEnded();
-    }
-    [super touchesEnded:touches withEvent:event];
 }
 
 #pragma mark - Setters
@@ -283,20 +257,8 @@
 
 #pragma mark Border and background setters
 
-+ (void)optimizeView:(UIView *)view forColor:(UIColor *)color {
-    if (color.alpha == 1.0f ) {
-        view.opaque = YES;
-        view.clearsContextBeforeDrawing = NO;
-    } else {
-        view.opaque = NO;
-        view.clearsContextBeforeDrawing = YES;
-    }
-}
-
 - (void)setBackgroundColor:(UIColor *)color {
   super.backgroundColor = color;
-  [MGBox optimizeView:self forColor:color];
-    
   if (self.borderStyle) {
     self.borderStyle = self.borderStyle;
   }
@@ -340,7 +302,6 @@
   _topBorderColor = color;
   if (color.alpha) {
     self.topBorder.backgroundColor = color;
-    [MGBox optimizeView:self.topBorder forColor:color];
     [self insertSubview:self.topBorder atIndex:0];
   } else {
     [self.topBorder removeFromSuperview];
@@ -352,7 +313,6 @@
   _bottomBorderColor = color;
   if (color.alpha) {
     self.bottomBorder.backgroundColor = color;
-    [MGBox optimizeView:self.bottomBorder forColor:color];
     [self insertSubview:self.bottomBorder atIndex:0];
   } else {
     [self.bottomBorder removeFromSuperview];
@@ -364,7 +324,6 @@
   _leftBorderColor = color;
   if (color.alpha) {
     self.leftBorder.backgroundColor = color;
-    [MGBox optimizeView:self.leftBorder forColor:color];
     [self insertSubview:self.leftBorder atIndex:0];
   } else {
     [self.leftBorder removeFromSuperview];
@@ -376,7 +335,6 @@
   _rightBorderColor = color;
   if (color.alpha) {
     self.rightBorder.backgroundColor = color;
-    [MGBox optimizeView:self.rightBorder forColor:color];
     [self insertSubview:self.rightBorder atIndex:0];
   } else {
     [self.rightBorder removeFromSuperview];
@@ -386,9 +344,9 @@
 
 #pragma mark - Getters
 
-- (NSMutableArray *)boxes {
+- (NSMutableOrderedSet *)boxes {
   if (!boxes) {
-    boxes = @[].mutableCopy;
+    boxes = NSMutableOrderedSet.orderedSet;
   }
   return boxes;
 }
@@ -416,20 +374,6 @@
     asyncQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
   }
   return asyncQueue;
-}
-
-#pragma mark - Metrics getters
-
-- (CGFloat)paddedVerticalCenter {
-  return self.innerHeight / 2 + self.topPadding;
-}
-
-- (CGFloat)innerWidth {
-  return self.width - self.leftPadding - self.rightPadding;
-}
-
-- (CGFloat)innerHeight {
-  return self.height - self.topPadding - self.bottomPadding;
 }
 
 #pragma mark - Border getters
@@ -523,4 +467,103 @@
   return ![touch.view isKindOfClass:UIControl.class];
 }
 
+-(UIPanGestureRecognizer *)panner {
+    if (!panner) {
+        panner = [[UIPanGestureRecognizer alloc]
+                  initWithTarget:self action:@selector(handlePan:)];
+        panner.delegate = self;
+    }
+    return panner;
+}
+-(void)panned {
+    if (self.onPan) {
+        self.onPan();
+    }
+}
+- (void)setOnPan:(Block)_onPan {
+    onPan = [_onPan copy];
+    if (onPan) {
+        self.pannable = YES;
+        
+    }
+}
+- (void)setPannable:(BOOL)can {
+    if (pannable == can) {
+        return;
+    }
+    pannable = can;
+    if (can) {
+        [self addGestureRecognizer:self.panner];
+    } else if (self.panner) {
+        [self removeGestureRecognizer:self.panner];
+    }
+}
+//UIPanGestureRecognizer
+//pan swipe http://www.mindtreatstudios.com/how-its-made/ios-gesture-recognizer-tips-tricks/
+-(IBAction)handlePan:(UIPanGestureRecognizer *)recognizer {
+    
+    if(self.allowPanning){
+        
+        if(recognizer.state == UIGestureRecognizerStateBegan){
+            NSLog(@"pan state began");
+            self.panning = YES;
+        }
+        else if(recognizer.state == UIGestureRecognizerStateEnded){
+            NSLog(@"pan state ended");
+            self.panning = NO;
+            self.allowPanning = NO;
+            
+        }
+        
+        [self.parentBox bringSubviewToFront:recognizer.view];
+        
+        [self panned];
+        
+        //NSLog(@"handeling pan");
+        CGPoint translation = [recognizer translationInView:self.parentBox];
+        recognizer.view.center = CGPointMake(recognizer.view.center.x + translation.x,
+                                             recognizer.view.center.y + translation.y);
+        [recognizer setTranslation:CGPointMake(0, 0) inView:self.parentBox];
+    }    
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    
+    if([gestureRecognizer isKindOfClass:[UIPanGestureRecognizer class]] && ! self.allowPanning) {
+        return NO;
+    }
+    return YES;
+    
+}
+/* Declare shouldRecognizeSimultaneouslyWithGestureRecognizer in scrollview do not declare it here
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    
+    return YES;
+    // Find out if the user is actively scrolling the tableView of which this is a member.
+    // If they are, return NO, and don't let the gesture recognizers work simultaneously.
+    //
+    // This works very well in maintaining user expectations while still allowing for the user to
+    // scroll the cell sideways when that is their true intent.
+    if ([gestureRecognizer isKindOfClass:[UIPanGestureRecognizer class]]) {
+        
+        // Find the current scrolling velocity in that view, in the Y direction.
+        CGFloat yVelocity = [(UIPanGestureRecognizer*)gestureRecognizer velocityInView:gestureRecognizer.view].y;
+        NSLog(@"%f",yVelocity);
+        // Return YES iff the user is not actively scrolling up.
+        return fabs(yVelocity) <= 0.25;
+        
+    }
+    return YES;
+}
+ */
+/*
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer
+{
+    if (![gestureRecognizer isKindOfClass:[UITapGestureRecognizer class]] && ![otherGestureRecognizer isKindOfClass:[UITapGestureRecognizer class]]) {
+        return YES;
+    }
+    
+    return NO;
+}
+
+*/
 @end

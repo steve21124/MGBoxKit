@@ -4,7 +4,6 @@
 
 #import "MGLayoutManager.h"
 #import "MGScrollView.h"
-#import "MGBoxProvider.h"
 
 @interface MGLayoutManager ()
 
@@ -34,102 +33,15 @@
   for (UIView <MGLayoutBox> *box in container.boxes) {
     NSAssert([box conformsToProtocol:@protocol(MGLayoutBox)], @"Items in the boxes set must conform to MGLayoutBox");
     [container addSubview:box];
-    box.parentBox = container;
+    box.parentBox = (id)container;
   }
 
   // children layout first
-  if (!container.dontLayoutChildren) {
-    for (id <MGLayoutBox> box in container.boxes) {
-      [box layout];
-    }
+  for (id box in container.boxes) {
+    [box layout];
   }
 
-  // positioning time
-  [MGLayoutManager positionBoxesIn:container];
-
-  // release the lock
-  container.layingOut = NO;
-}
-
-+ (void)layoutBoxesIn:(UIView <MGLayoutBox> *)container
-            atIndexes:(NSIndexSet *)indexes {
-
-  // remove boxes that aren't at the given indexes
-  for (int i = 0; i < container.boxes.count; i++) {
-    if (![indexes containsIndex:i]) {
-      UIView *box = container.boxes[i];
-      if ([box isKindOfClass:UIView.class] && box.superview) {
-        [box removeFromSuperview];
-      }
-    }
-  }
-
-  // remove boxes no longer in 'boxes'
-  NSArray *gone = [MGLayoutManager findBoxesInView:container
-      notInSet:container.boxes];
-  [gone makeObjectsPerformSelector:@selector(removeFromSuperview)];
-
-  // add and position boxes at the given indexes
-  [indexes enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
-
-    // get the box
-    UIView <MGLayoutBox>
-        *box = index < container.boxes.count ? container.boxes[index] : nil;
-    if (!box || (id)box == NSNull.null) {
-      container.boxes[index] = box = [container.boxProvider boxAtIndex:index];
-    }
-
-    if (!box.superview) {
-      box.parentBox = container;
-      [container addSubview:box];
-      [box layout];
-    }
-
-    // get and set the origin
-    CGPoint origin = [self positionForBoxIn:container atIndex:index];
-    origin.x += box.leftMargin;
-    origin.y += box.topMargin;
-    if (!CGPointEqualToPoint(origin, box.origin)) {
-      box.origin = origin;
-    }
-  }];
-}
-
-+ (CGPoint)positionForBoxIn:(UIView <MGLayoutBox> *)container
-                    atIndex:(NSUInteger)index {
-
-  // fill missing positions and boxes
-  if (index >= container.boxes.count) {
-    CGFloat y = container.topPadding;
-    for (int i = 0; i < index; i++) {
-      CGSize size = [container.boxProvider sizeForBoxAtIndex:i];
-      CGPoint origin = (CGPoint){container.leftPadding, y};
-      y += size.height;
-      if (i >= container.boxes.count) {
-        container.boxPositions[i] = [NSValue valueWithCGPoint:origin];
-        container.boxes[i] = NSNull.null;
-      }
-    }
-  }
-
-  // previous box position and size
-  CGPoint prevPos = index
-      ? [container.boxPositions[index - 1] CGPointValue]
-      : CGPointZero;
-  CGSize prevSize = index
-      ? [container.boxProvider sizeForBoxAtIndex:index - 1]
-      : CGSizeZero;
-
-  // calc the position
-  CGPoint pos;
-  pos.x = container.leftPadding;
-  pos.y = prevPos.y + prevSize.height;
-  container.boxPositions[index] = [NSValue valueWithCGPoint:pos];
-
-  return pos;
-}
-
-+ (void)positionBoxesIn:(UIView <MGLayoutBox> *)container {
+  // layout the boxes
   switch (container.contentLayoutMode) {
     case MGLayoutTableStyle:
       [MGLayoutManager stackTableStyle:container onlyMove:nil];
@@ -144,6 +56,9 @@
 
   // zindex time
   [self stackByZIndexIn:container];
+
+  // release the lock
+  container.layingOut = NO;
 }
 
 + (void)layoutBoxesIn:(UIView <MGLayoutBox> *)container
@@ -158,12 +73,12 @@
   // find new top boxes
   NSMutableOrderedSet *newTopBoxes = NSMutableOrderedSet.orderedSet;
   for (UIView <MGLayoutBox> *box in container.boxes) {
-    if (box.boxLayoutMode != MGBoxLayoutAutomatic) {
+    if (box.replacementFor || box.boxLayoutMode != MGBoxLayoutAutomatic) {
       continue;
     }
 
     // found the first existing box
-    if ([container.subviews containsObject:box] || box.replacementFor) {
+    if ([container.subviews containsObject:box]) {
       break;
     }
 
@@ -182,14 +97,12 @@
 
   // parent box relationship
   for (UIView <MGLayoutBox> *box in container.boxes) {
-    box.parentBox = container;
+    box.parentBox = (id)container;
   }
 
   // children layout first
-  if (!container.dontLayoutChildren) {
-    for (id <MGLayoutBox> box in container.boxes) {
-      [box layout];
-    }
+  for (id box in container.boxes) {
+    [box layout];
   }
 
   // set origin for new top boxes
@@ -241,7 +154,7 @@
   [MGLayoutManager stackByZIndexIn:container];
 
   // animate all to final pos and alpha
-  [UIView animateWithDuration:speed delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction animations:^{
+  [UIView animateWithDuration:speed animations:^{
 
     // gone boxes fade out
     for (UIView <MGLayoutBox> *box in gone) {
@@ -256,7 +169,17 @@
     }
 
     // set final positions
-    [MGLayoutManager positionBoxesIn:container];
+    switch (container.contentLayoutMode) {
+      case MGLayoutTableStyle:
+        [MGLayoutManager stackTableStyle:container onlyMove:nil];
+        break;
+      case MGLayoutGridStyle:
+        [MGLayoutManager stackGridStyle:container onlyMove:nil];
+        break;
+    }
+
+    // final positions for attached and replacement boxes
+    [MGLayoutManager positionAttachedBoxesIn:container];
 
     // release the layout lock
     container.layingOut = NO;
@@ -264,11 +187,7 @@
   } completion:^(BOOL done) {
 
     // clean up
-    for (UIView <MGLayoutBox> *goner in gone) {
-      if (goner.superview == container && ![container.boxes containsObject:goner]) {
-        [goner removeFromSuperview];
-      }
-    }
+    [gone makeObjectsPerformSelector:@selector(removeFromSuperview)];
 
     // completion handler
     if (completion) {
@@ -289,11 +208,7 @@
     maxWidth = MAX(maxWidth, box.leftMargin + box.width + box.rightMargin);
     y += box.topMargin;
     if (!only || [only containsObject:box]) {
-      CGPoint newOrigin = CGPointMake(container.leftPadding + box.leftMargin,
-          roundToPixel(y));
-      if (!CGPointEqualToPoint(newOrigin, box.origin)) {
-        box.origin = newOrigin;
-      }
+      box.origin = CGPointMake(container.leftPadding + box.leftMargin, roundf(y));
     }
     y += box.height + box.bottomMargin;
   }
@@ -304,25 +219,19 @@
   }
 
   // update size to fit the children (and possible shrink wrap)
-  CGSize newSize, oldSize = [container isKindOfClass:MGScrollView.class]
-      ? [(id)container contentSize]
-      : container.size;
+  CGSize size;
   if (container.sizingMode == MGResizingShrinkWrap) {
-    newSize.width = MAX(container.leftPadding + maxWidth + container.rightPadding, container.minWidth);
-    newSize.height = y + container.bottomPadding;
+    size.width = container.leftPadding + maxWidth + container.rightPadding;
+    size.height = y + container.bottomPadding;
   } else {
-    newSize.width = MAX(oldSize.width, container.leftPadding + maxWidth
+    size.width = MAX(container.width, container.leftPadding + maxWidth
         + container.rightPadding);
-    newSize.height = MAX(oldSize.height, y + container.bottomPadding);
+    size.height = MAX(container.height, y + container.bottomPadding);
   }
-
-  // only update size if it's changed
-  if (!CGSizeEqualToSize(newSize, oldSize)) {
-    if ([container isKindOfClass:MGScrollView.class]) {
-      [(id)container setContentSize:newSize];
-    } else {
-      container.size = newSize;
-    }
+  if ([container isKindOfClass:MGScrollView.class]) {
+    [(id)container setContentSize:size];
+  } else {
+    container.size = size;
   }
 }
 
@@ -345,7 +254,7 @@
     // position
     x += box.leftMargin;
     if (!only || [only containsObject:box]) {
-      box.origin = CGPointMake(roundToPixel(x), roundToPixel(y + box.topMargin));
+      box.origin = CGPointMake(roundf(x), roundf(y + box.topMargin));
     }
 
     x += box.width + box.rightMargin;
@@ -458,34 +367,35 @@
 }
 
 + (void)stackByZIndexIn:(UIView *)container {
-  NSArray *sorted =
-      [container.subviews sortedArrayUsingComparator:^NSComparisonResult(id<MGLayoutBox> view1,
-          id<MGLayoutBox> view2) {
-        int z1 = [view1 respondsToSelector:@selector(zIndex)] ? [view1 zIndex] : 0;
-        int z2 = [view2 respondsToSelector:@selector(zIndex)] ? [view2 zIndex] : 0;
-        if (z1 > z2) {
-          return NSOrderedDescending;
-        }
-        if (z1 < z2) {
-          return NSOrderedAscending;
-        }
-        return NSOrderedSame;
-      }];
-
-  for (UIView *view in sorted) {
-    int sortedIndex = [sorted indexOfObject:view];
-    if (sortedIndex != [container.subviews indexOfObject:view]) {
-      [container insertSubview:view atIndex:sortedIndex];
+  NSSortDescriptor
+      *sort = [NSSortDescriptor sortDescriptorWithKey:@"zIndex" ascending:YES];
+  NSMutableArray *undies = @[].mutableCopy;
+  NSMutableArray *middles = @[].mutableCopy;
+  NSMutableArray *topsies = @[].mutableCopy;
+  for (id <MGLayoutBox> view in container.subviews) {
+    if ([view conformsToProtocol:@protocol(MGLayoutBox)]) {
+      if (view.zIndex < 0) {
+        [undies addObject:view];
+      } else if (view.zIndex > 0) {
+        [topsies addObject:view];
+      } else {
+        [middles addObject:view];
+      }
+    } else {
+      [middles addObject:view];
     }
   }
-}
-
-float roundToPixel(float value) {
-    if (UIScreen.mainScreen.scale == 1.0f) {
-        return roundf(value);
-    }
-    //retina display, round to nearest half point
-    return roundf(value * 2.0) / 2.0;
+  [undies sortUsingDescriptors:@[sort]];
+  [topsies sortUsingDescriptors:@[sort]];
+  for (id view in undies) {
+    [container bringSubviewToFront:view];
+  }
+  for (id view in middles) {
+    [container bringSubviewToFront:view];
+  }
+  for (id view in topsies) {
+    [container bringSubviewToFront:view];
+  }
 }
 
 @end

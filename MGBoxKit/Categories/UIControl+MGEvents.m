@@ -5,7 +5,7 @@
 #import "UIControl+MGEvents.h"
 #import <objc/runtime.h>
 
-static char *MGEventHandlersKey = "MGEventHandlersKey";
+static char *MGEventHandlersKey;
 
 @implementation UIControl (MGEvents)
 

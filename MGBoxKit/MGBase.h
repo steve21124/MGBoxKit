@@ -3,10 +3,10 @@
 //
 
 typedef void(^Block)();
-typedef void(^BlockWithContext)(id context);
 
 #define CLAMP(x,low,high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
 
+#import <QuartzCore/QuartzCore.h>
 #import "MGBlockWrapper.h"
 #import "UIView+MGEasyFrame.h"
 #import "NSObject+MGEvents.h"
